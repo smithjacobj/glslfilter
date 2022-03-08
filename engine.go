@@ -1,0 +1,240 @@
+package glslfilter
+
+import (
+	"fmt"
+	"image"
+	"image/draw"
+	_ "image/png"
+	"io/ioutil"
+	"log"
+	"os"
+	"time"
+	"unsafe"
+
+	"github.com/go-gl/gl/v3.3-core/gl"
+)
+
+var screenTriangleVertices = []float32{
+	-1, -3, 0, 0, 2,
+	-1, 1, 0, 0, 0,
+	3, 1, 0, 2, 0,
+}
+
+// this is reversed because the FBO renders opposite the window buffer
+var fboTriangleVertices = []float32{
+	-1, 3, 0, 0, 2,
+	-1, -1, 0, 0, 0,
+	3, -1, 0, 2, 0,
+}
+
+const vertexPositionOffset = 0
+const vertexPositionSize = 3
+const vertexUVOffset = vertexPositionSize * unsafe.Sizeof(float32(0))
+const vertexUVSize = 2
+const vertexStride = (vertexPositionSize + vertexUVSize) * unsafe.Sizeof(float32(0))
+
+const vertexPositionLocation = 1
+const vertexUVLocation = 2
+const vertexShaderSource = `
+#version 330 core
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(location=1) in vec3 vertexPosition;
+layout(location=2) in vec2 vertexTexCoord;
+layout(location=1) out vec2 fragTexCoord;
+
+void main() {
+	// no transform, this is direct to screen space
+	gl_Position = vec4(vertexPosition, 1.0);
+
+	fragTexCoord = vertexTexCoord;
+}
+`
+
+const frameCountDuration = time.Second
+
+type interstageFBO struct {
+	fboName     uint32
+	textureName uint32
+}
+
+type Engine struct {
+	debug          bool
+	viewportSize   struct{ x, y int }
+	fboVAO         uint32
+	screenVAO      uint32
+	stages         []*FilterStage
+	interstageFBOs [2]interstageFBO
+
+	frameCount         int
+	nextFrameCountTime time.Time
+}
+
+func NewEngine(viewportDimensions image.Rectangle, debug bool) (engine *Engine, err error) {
+	engine = new(Engine)
+
+	err = gl.Init()
+	if err != nil {
+		return nil, err
+	}
+
+	engine.debug = debug
+	if debug {
+		gl.Enable(gl.DEBUG_OUTPUT)
+		gl.DebugMessageCallback(func(source, gltype, id, severity uint32, length int32, message string, userParam unsafe.Pointer) {
+			log.Printf("GL: %s", message)
+		}, nil)
+	}
+
+	engine.viewportSize.x = viewportDimensions.Dx()
+	engine.viewportSize.y = viewportDimensions.Dy()
+
+	return engine, nil
+}
+
+func (engine *Engine) Init(stages []*FilterStage) (err error) {
+	for i := range engine.interstageFBOs {
+		targetFBOName, targetFBOTextureName, err := createFramebufferTarget()
+		if err != nil {
+			return err
+		}
+		engine.interstageFBOs[i] = interstageFBO{targetFBOName, targetFBOTextureName}
+		log.Printf("created FBO %d rendering to texture %d", targetFBOName, targetFBOTextureName)
+	}
+
+	engine.screenVAO = createWindowBufferVAO(screenTriangleVertices)
+	engine.fboVAO = createWindowBufferVAO(fboTriangleVertices)
+	engine.stages = stages
+
+	gl.ClearColor(0, 0, 0, 1)
+
+	engine.nextFrameCountTime = time.Now().Add(frameCountDuration)
+
+	return nil
+}
+
+func (engine *Engine) Render() {
+	for i, stage := range engine.stages {
+		gl.UseProgram(stage.program)
+
+		gl.Uniform2i(0, int32(engine.viewportSize.x), int32(engine.viewportSize.y))
+
+		if i > 0 {
+			previousFBO := engine.interstageFBOs[(i-1)%2]
+			gl.BindTextureUnit(0, previousFBO.textureName)
+		}
+
+		for i, texture := range stage.textures {
+			gl.BindTextureUnit(uint32(i+1), texture)
+		}
+
+		if i < len(engine.stages)-1 {
+			targetFBO := engine.interstageFBOs[i%2]
+			gl.BindFramebuffer(gl.FRAMEBUFFER, targetFBO.fboName)
+			gl.BindVertexArray(engine.fboVAO)
+		} else {
+			gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+			gl.BindVertexArray(engine.screenVAO)
+		}
+
+		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+		gl.DrawArrays(gl.TRIANGLES, 0, 3)
+
+		engine.frameCount++
+		if engine.nextFrameCountTime.Before(time.Now()) {
+			engine.printFrameCount()
+		}
+	}
+}
+
+func (engine *Engine) printFrameCount() {
+	if !engine.debug {
+		return
+	}
+	fps := float64(engine.frameCount) / frameCountDuration.Seconds()
+	log.Printf("Framerate: %f FPS", fps)
+	engine.frameCount = 0
+	engine.nextFrameCountTime = time.Now().Add(frameCountDuration)
+}
+
+func createWindowBufferVAO(vertices []float32) (name uint32) {
+	var vbo uint32
+	gl.CreateBuffers(1, &vbo)
+	gl.NamedBufferStorage(vbo, len(vertices)*int(unsafe.Sizeof(float32(0))), gl.Ptr(vertices), gl.MAP_READ_BIT)
+
+	var vao uint32
+	gl.CreateVertexArrays(1, &vao)
+	gl.EnableVertexArrayAttrib(vao, vertexPositionLocation)
+	gl.VertexArrayVertexBuffer(vao, 0, vbo, vertexPositionOffset, int32(vertexStride))
+	gl.VertexArrayAttribBinding(vao, vertexPositionLocation, 0)
+	gl.VertexArrayAttribFormat(vao, vertexPositionLocation, vertexPositionSize, gl.FLOAT, false, uint32(vertexPositionOffset))
+
+	gl.EnableVertexArrayAttrib(vao, vertexUVLocation)
+	gl.VertexArrayVertexBuffer(vao, 1, vbo, int(vertexUVOffset), int32(vertexStride))
+	gl.VertexArrayAttribBinding(vao, vertexUVLocation, 0)
+	gl.VertexArrayAttribFormat(vao, vertexUVLocation, vertexUVSize, gl.FLOAT, false, uint32(vertexUVOffset))
+
+	return vao
+}
+
+func createFramebufferTarget() (fboName, texName uint32, err error) {
+	var viewBoundsVector [4]int32
+	gl.GetIntegerv(gl.VIEWPORT, &viewBoundsVector[0])
+	viewBounds := image.Rect(int(viewBoundsVector[0]), int(viewBoundsVector[1]), int(viewBoundsVector[2]), int(viewBoundsVector[3]))
+	gl.CreateFramebuffers(1, &fboName)
+	gl.CreateTextures(gl.TEXTURE_2D, 1, &texName)
+	gl.TextureStorage2D(texName, 1, gl.RGBA8, int32(viewBounds.Dx()), int32(viewBounds.Dy()))
+	gl.TextureParameteri(texName, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	gl.TextureParameteri(texName, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	gl.NamedFramebufferTexture(fboName, gl.COLOR_ATTACHMENT0, texName, 0)
+	gl.NamedFramebufferDrawBuffer(fboName, gl.COLOR_ATTACHMENT0)
+
+	status := gl.CheckNamedFramebufferStatus(fboName, gl.FRAMEBUFFER)
+	if status != gl.FRAMEBUFFER_COMPLETE {
+		return 0, 0, fmt.Errorf("error creating framebuffer: %d", status)
+	}
+
+	return fboName, texName, nil
+}
+
+func hasEnoughTextureUnits(n int) bool {
+	var availableCount int32
+	gl.GetIntegerv(gl.MAX_TEXTURE_IMAGE_UNITS, &availableCount)
+	return n <= int(availableCount)
+}
+
+func LoadFragmentShader(fragmentShaderPath string) (string, error) {
+	fragmentShaderFile, err := os.Open(fragmentShaderPath)
+	if err != nil {
+		return "", err
+	}
+
+	fragmentShaderSource, err := ioutil.ReadAll(fragmentShaderFile)
+	if err != nil {
+		return "", err
+	}
+
+	return string(fragmentShaderSource), nil
+}
+
+func LoadTextureData(path string) (texture *image.RGBA, err error) {
+	fmt.Printf("loading texture: %s\n", path)
+	imageFile, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	imageData, _, err := image.Decode(imageFile)
+	if err != nil {
+		return nil, err
+	}
+
+	imageRGBA := image.NewRGBA(imageData.Bounds())
+	// we don't support cropped images (where the buffer size is larger than the image)
+	if imageRGBA.Stride != imageRGBA.Rect.Size().X*4 {
+		return nil, fmt.Errorf("unsupported stride: %d", imageRGBA.Rect.Size().X*4)
+	}
+	draw.Draw(imageRGBA, imageRGBA.Bounds(), imageData, image.Point{0, 0}, draw.Src)
+
+	return imageRGBA, nil
+}

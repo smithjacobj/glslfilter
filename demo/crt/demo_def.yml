@@ -1,0 +1,11 @@
+render:
+  width: 2940
+  height: 1956
+stages:
+  - fragmentShaderPath: "../demo/crt/demo_stage1.frag"
+    textures:
+      - path: "C:/Users/jacobjms/Pictures/super-mario-bros.png"
+      - path: "C:/Users/jacobjms/Pictures/phosphor.png"
+  - fragmentShaderPath: "../demo/crt/demo_stage2.frag"
+  - fragmentShaderPath: "../demo/crt/demo_stage3.frag"
+  - fragmentShaderPath: "../demo/crt/demo_stage4.frag"

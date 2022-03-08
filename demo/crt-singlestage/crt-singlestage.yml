@@ -1,0 +1,8 @@
+render:
+  width: ${width}
+  height: ${height}
+stages:
+  - fragmentShaderPath: "${script_path}/crt-singlestage.frag"
+    textures:
+      - path: "${source_path}"
+      - path: "${script_path}/phosphor.png"

@@ -1,0 +1,9 @@
+render:
+  width: 2352
+  height: 1576
+stages:
+  - fragmentShaderPath: "../demo/compression-artifact/stage1.frag"
+    textures:
+      - path: "../demo/compression-artifact/cyberpunk.png"
+      - path: "../demo/compression-artifact/trigger.png"
+        filter: NEAREST
