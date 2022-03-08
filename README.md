@@ -4,3 +4,5 @@ I've had the mind to create a filter that would make tiled blend passes simple s
 I actually originally was going to write it in Vulkan, but I wanted to skip the boilerplate and the fact that you need to compile shader code to SPIR-V first - while SPIR-V is sensible, it complicates the code here. OpenGL lets me defer that functionality to the driver.
 
 If you just want to try it out, build `glslfilter-glfw` and see `/demo/crt-singlestage`
+
+![image](https://user-images.githubusercontent.com/3700215/157331400-5d08c086-cd34-42a4-ab1e-82cd7f5e77c2.png)
