@@ -85,16 +85,23 @@ func main() {
 	perfTimer.LogSplit("render")
 
 	if !showResult {
-		log.Println("writing out PNG")
-
+		wait := make(chan bool)
 		imageData := engine.GetLastRenderImage()
-		err := png.Encode(os.Stdout, imageData)
-		util.Invariant(err)
 
-		perfTimer.LogSplit("write out")
-	}
+		log.Println("writing out PNG")
+		go func() {
+			err := png.Encode(os.Stdout, imageData)
+			util.Invariant(err)
 
-	for showResult && !window.ShouldClose() {
-		glfw.PollEvents()
+			wait <- true
+		}()
+		defer func() {
+			<-wait
+			perfTimer.LogSplit("PNG written")
+		}()
+	} else {
+		for !window.ShouldClose() {
+			glfw.PollEvents()
+		}
 	}
 }
