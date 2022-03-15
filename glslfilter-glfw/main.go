@@ -2,7 +2,9 @@ package main
 
 import (
 	"image"
+	"image/png"
 	_ "image/png"
+	"os"
 	"runtime"
 
 	"github.com/go-gl/glfw/v3.3/glfw"
@@ -17,11 +19,25 @@ func init() {
 	runtime.LockOSThread()
 }
 
+var showResult bool = true
+
+func init() {
+	fileInfo, err := os.Stdout.Stat()
+	util.Invariant(err)
+	// if we're just in a terminal and not piped, show the window
+	showResult = fileInfo.Mode()&os.ModeCharDevice != 0
+}
+
 func main() {
 	util.Invariant(glfw.Init())
 	defer glfw.Terminate()
 
-	glfw.WindowHint(glfw.Resizable, glfw.True)
+	if showResult {
+		glfw.WindowHint(glfw.Visible, glfw.True)
+	} else {
+		glfw.WindowHint(glfw.Visible, glfw.False)
+	}
+	glfw.WindowHint(glfw.Resizable, glfw.False)
 	glfw.WindowHint(glfw.ContextVersionMajor, 3)
 	glfw.WindowHint(glfw.ContextVersionMinor, 3)
 	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
@@ -34,7 +50,7 @@ func main() {
 	util.Invariant(err)
 	window.MakeContextCurrent()
 
-	engine, err := glslfilter.NewEngine(image.Rect(0, 0, definition.Render.Width, definition.Render.Height), true)
+	engine, err := glslfilter.NewEngine(image.Rect(0, 0, definition.Render.Width, definition.Render.Height), true, showResult)
 	util.Invariant(err)
 
 	stages := []*glslfilter.FilterStage{}
@@ -59,9 +75,15 @@ func main() {
 	util.Invariant(err)
 
 	engine.Render()
-
 	window.SwapBuffers()
-	for !window.ShouldClose() {
+
+	if !showResult {
+		imageData := engine.GetLastRenderImage()
+		err := png.Encode(os.Stdout, imageData)
+		util.Invariant(err)
+	}
+
+	for showResult && !window.ShouldClose() {
 		glfw.PollEvents()
 	}
 }
