@@ -51,6 +51,22 @@ void main() {
 }
 `
 
+const lastResultToScreen = `
+#version 330 core
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_ARB_explicit_uniform_location : enable
+#extension GL_ARB_shading_language_420pack : enable
+
+layout(location = 0) uniform ivec2 outputResolution;
+layout(location = 1) in vec2 fragTexCoord;
+layout(binding = 0) uniform sampler2D previousResult;
+
+layout(location = 0) out vec4 fragColor;
+
+void main() {
+	fragColor = texture(previousResult, fragTexCoord);	
+}`
+
 const frameCountDuration = time.Second
 
 type interstageFBO struct {
@@ -60,18 +76,18 @@ type interstageFBO struct {
 
 type Engine struct {
 	debug          bool
+	drawToScreen   bool
 	viewportSize   struct{ x, y int }
 	fboVAO         uint32
 	screenVAO      uint32
 	stages         []*FilterStage
+	drawStage      *FilterStage
 	interstageFBOs [2]interstageFBO
-
-	frameCount         int
-	nextFrameCountTime time.Time
 }
 
-func NewEngine(viewportDimensions image.Rectangle, debug bool) (engine *Engine, err error) {
+func NewEngine(viewportDimensions image.Rectangle, debug bool, drawToScreen bool) (engine *Engine, err error) {
 	engine = new(Engine)
+	engine.drawToScreen = drawToScreen
 
 	err = gl.Init()
 	if err != nil {
@@ -106,9 +122,11 @@ func (engine *Engine) Init(stages []*FilterStage) (err error) {
 	engine.fboVAO = createWindowBufferVAO(fboTriangleVertices)
 	engine.stages = stages
 
-	gl.ClearColor(0, 0, 0, 1)
+	if engine.drawStage, err = NewFilterStage(lastResultToScreen, []Texture{}); err != nil {
+		return err
+	}
 
-	engine.nextFrameCountTime = time.Now().Add(frameCountDuration)
+	gl.ClearColor(0, 0, 0, 1)
 
 	return nil
 }
@@ -128,33 +146,41 @@ func (engine *Engine) Render() {
 			gl.BindTextureUnit(uint32(i+1), texture)
 		}
 
-		if i < len(engine.stages)-1 {
-			targetFBO := engine.interstageFBOs[i%2]
-			gl.BindFramebuffer(gl.FRAMEBUFFER, targetFBO.fboName)
-			gl.BindVertexArray(engine.fboVAO)
-		} else {
-			gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-			gl.BindVertexArray(engine.screenVAO)
-		}
+		targetFBO := engine.interstageFBOs[i%2]
+		gl.BindFramebuffer(gl.FRAMEBUFFER, targetFBO.fboName)
+		gl.BindVertexArray(engine.fboVAO)
 
 		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 		gl.DrawArrays(gl.TRIANGLES, 0, 3)
+	}
 
-		engine.frameCount++
-		if engine.nextFrameCountTime.Before(time.Now()) {
-			engine.printFrameCount()
-		}
+	// Why do we render to an FBO, then to the screen? So we can read the texture image from the
+	// last FBO for export.
+	if engine.drawToScreen {
+		gl.UseProgram(engine.drawStage.program)
+		gl.Uniform2i(0, int32(engine.viewportSize.x), int32(engine.viewportSize.y))
+
+		previousFBOtexture := engine.getFinalResultTexture()
+		gl.BindTextureUnit(0, previousFBOtexture)
+
+		gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+		gl.BindVertexArray(engine.screenVAO)
+
+		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+		gl.DrawArrays(gl.TRIANGLES, 0, 3)
 	}
 }
 
-func (engine *Engine) printFrameCount() {
-	if !engine.debug {
-		return
-	}
-	fps := float64(engine.frameCount) / frameCountDuration.Seconds()
-	log.Printf("Framerate: %f FPS", fps)
-	engine.frameCount = 0
-	engine.nextFrameCountTime = time.Now().Add(frameCountDuration)
+func (engine *Engine) GetLastRenderImage() *image.RGBA {
+	rect := image.Rect(0, 0, engine.viewportSize.x, engine.viewportSize.y)
+	image := image.NewRGBA(rect)
+
+	gl.GetTextureImage(engine.getFinalResultTexture(), 0, gl.RGBA, gl.UNSIGNED_BYTE, int32(len(image.Pix)), gl.Ptr(&image.Pix[0]))
+	return image
+}
+
+func (engine *Engine) getFinalResultTexture() (texName uint32) {
+	return engine.interstageFBOs[(len(engine.stages)-1)%2].textureName
 }
 
 func createWindowBufferVAO(vertices []float32) (name uint32) {
@@ -218,7 +244,7 @@ func LoadFragmentShader(fragmentShaderPath string) (string, error) {
 }
 
 func LoadTextureData(path string) (texture *image.RGBA, err error) {
-	fmt.Printf("loading texture: %s\n", path)
+	log.Printf("loading texture: %s\n", path)
 	imageFile, err := os.Open(path)
 	if err != nil {
 		return nil, err
