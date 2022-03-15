@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/png"
 	_ "image/png"
+	"log"
 	"os"
 	"runtime"
 
@@ -29,6 +30,8 @@ func init() {
 }
 
 func main() {
+	perfTimer := util.NewPerfTimer()
+
 	util.Invariant(glfw.Init())
 	defer glfw.Terminate()
 
@@ -74,13 +77,21 @@ func main() {
 	err = engine.Init(stages)
 	util.Invariant(err)
 
+	perfTimer.LogSplit("init")
+
 	engine.Render()
 	window.SwapBuffers()
 
+	perfTimer.LogSplit("render")
+
 	if !showResult {
+		log.Println("writing out PNG")
+
 		imageData := engine.GetLastRenderImage()
 		err := png.Encode(os.Stdout, imageData)
 		util.Invariant(err)
+
+		perfTimer.LogSplit("write out")
 	}
 
 	for showResult && !window.ShouldClose() {
