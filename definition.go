@@ -13,6 +13,7 @@ type TextureFilterType int32
 
 type TextureDefinition struct {
 	Path   string
+	Name   string
 	Filter TextureFilterType
 }
 

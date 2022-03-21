@@ -65,7 +65,13 @@ func main() {
 		for _, textureDefinition := range stageDefinition.Textures {
 			textureRGBA, err := glslfilter.LoadTextureData(textureDefinition.Path)
 			util.Invariant(err)
-			textures = append(textures, glslfilter.Texture{Data: textureRGBA, Filter: int32(textureDefinition.Filter)})
+			textures = append(
+				textures,
+				glslfilter.Texture{
+					Data:        textureRGBA,
+					BindingName: textureDefinition.Name,
+					Filter:      int32(textureDefinition.Filter),
+				})
 		}
 
 		stage, err := glslfilter.NewFilterStage(fragmentShaderSource, textures)
@@ -79,7 +85,9 @@ func main() {
 
 	perfTimer.LogSplit("init")
 
-	engine.Render()
+	if err := engine.Render(); err != nil {
+		util.Invariant(err)
+	}
 	window.SwapBuffers()
 
 	perfTimer.LogSplit("render")

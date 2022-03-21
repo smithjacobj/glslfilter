@@ -8,11 +8,14 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"time"
 	"unsafe"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 )
+
+const kGLLocationNotFound = -1
+const kViewportSizeBindingName = "outputResolution\x00"
+const kPreviousResultBindingName = "previousResult\x00"
 
 var screenTriangleVertices = []float32{
 	-1, -3, 0, 0, 2,
@@ -33,15 +36,15 @@ const vertexUVOffset = vertexPositionSize * unsafe.Sizeof(float32(0))
 const vertexUVSize = 2
 const vertexStride = (vertexPositionSize + vertexUVSize) * unsafe.Sizeof(float32(0))
 
-const vertexPositionLocation = 1
-const vertexUVLocation = 2
+const vertexPositionLocation = 0
+const vertexUVLocation = 1
 const vertexShaderSource = `
 #version 330 core
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(location=1) in vec3 vertexPosition;
-layout(location=2) in vec2 vertexTexCoord;
-layout(location=1) out vec2 fragTexCoord;
+layout(location=0) in vec3 vertexPosition;
+layout(location=1) in vec2 vertexTexCoord;
+layout(location=0) out vec2 fragTexCoord;
 
 void main() {
 	// no transform, this is direct to screen space
@@ -57,8 +60,8 @@ const lastResultToScreen = `
 #extension GL_ARB_explicit_uniform_location : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-layout(location = 0) uniform ivec2 outputResolution;
-layout(location = 1) in vec2 fragTexCoord;
+layout(location = 0) in vec2 fragTexCoord;
+layout(location = 1) uniform ivec2 outputResolution;
 layout(binding = 0) uniform sampler2D previousResult;
 
 layout(location = 0) out vec4 fragColor;
@@ -66,8 +69,6 @@ layout(location = 0) out vec4 fragColor;
 void main() {
 	fragColor = texture(previousResult, fragTexCoord);	
 }`
-
-const frameCountDuration = time.Second
 
 type interstageFBO struct {
 	fboName     uint32
@@ -131,19 +132,41 @@ func (engine *Engine) Init(stages []*FilterStage) (err error) {
 	return nil
 }
 
-func (engine *Engine) Render() {
+func (engine *Engine) Render() error {
+	locationNotFoundError := func(bindingName string) error { return fmt.Errorf("binding %s not found", bindingName) }
+
 	for i, stage := range engine.stages {
 		gl.UseProgram(stage.program)
 
-		gl.Uniform2i(0, int32(engine.viewportSize.x), int32(engine.viewportSize.y))
+		viewportSizeLocation := gl.GetUniformLocation(stage.program, gl.Str(kViewportSizeBindingName))
+		if viewportSizeLocation != kGLLocationNotFound {
+			gl.Uniform2i(viewportSizeLocation, int32(engine.viewportSize.x), int32(engine.viewportSize.y))
+		}
 
 		if i > 0 {
 			previousFBO := engine.interstageFBOs[(i-1)%2]
-			gl.BindTextureUnit(0, previousFBO.textureName)
+			previousResultLocation := gl.GetUniformLocation(stage.program, gl.Str(kPreviousResultBindingName))
+			if previousResultLocation == kGLLocationNotFound {
+				return locationNotFoundError(kPreviousResultBindingName)
+			} else {
+				gl.BindTextureUnit(uint32(previousResultLocation), previousFBO.textureName)
+			}
 		}
 
-		for i, texture := range stage.textures {
-			gl.BindTextureUnit(uint32(i+1), texture)
+		for bindingName, texture := range stage.textures {
+			bindingLocation := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
+			log.Printf("binding %s location %d", bindingName, bindingLocation)
+			if bindingLocation == kGLLocationNotFound {
+				return locationNotFoundError(bindingName)
+			} else {
+				var textureUnit int32 = -1
+				gl.GetUniformiv(stage.program, bindingLocation, &textureUnit)
+				if textureUnit == kGLLocationNotFound {
+					return fmt.Errorf("binding %s not found", bindingName)
+				} else {
+					gl.BindTextureUnit(uint32(textureUnit), texture)
+				}
+			}
 		}
 
 		targetFBO := engine.interstageFBOs[i%2]
@@ -158,10 +181,19 @@ func (engine *Engine) Render() {
 	// last FBO for export.
 	if engine.drawToScreen {
 		gl.UseProgram(engine.drawStage.program)
-		gl.Uniform2i(0, int32(engine.viewportSize.x), int32(engine.viewportSize.y))
+
+		viewportSizeLocation := gl.GetUniformLocation(engine.drawStage.program, gl.Str(kViewportSizeBindingName))
+		if viewportSizeLocation != kGLLocationNotFound {
+			gl.Uniform2i(viewportSizeLocation, int32(engine.viewportSize.x), int32(engine.viewportSize.y))
+		}
 
 		previousFBOtexture := engine.getFinalResultTexture()
-		gl.BindTextureUnit(0, previousFBOtexture)
+		previousResultLocation := gl.GetUniformLocation(engine.drawStage.program, gl.Str(kPreviousResultBindingName))
+		if previousResultLocation == kGLLocationNotFound {
+			return locationNotFoundError(kPreviousResultBindingName)
+		} else {
+			gl.BindTextureUnit(uint32(previousResultLocation), previousFBOtexture)
+		}
 
 		gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
 		gl.BindVertexArray(engine.screenVAO)
@@ -169,6 +201,8 @@ func (engine *Engine) Render() {
 		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 		gl.DrawArrays(gl.TRIANGLES, 0, 3)
 	}
+
+	return nil
 }
 
 func (engine *Engine) GetLastRenderImage() *image.RGBA {
