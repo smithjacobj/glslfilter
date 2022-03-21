@@ -155,7 +155,6 @@ func (engine *Engine) Render() error {
 
 		for bindingName, texture := range stage.textures {
 			bindingLocation := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
-			log.Printf("binding %s location %d", bindingName, bindingLocation)
 			if bindingLocation == kGLLocationNotFound {
 				return locationNotFoundError(bindingName)
 			} else {

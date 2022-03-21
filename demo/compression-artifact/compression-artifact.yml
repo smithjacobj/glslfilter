@@ -5,5 +5,7 @@ stages:
   - fragmentShaderPath: "../demo/compression-artifact/stage1.frag"
     textures:
       - path: "../demo/compression-artifact/cyberpunk.png"
+        name: "baseTexture"
       - path: "../demo/compression-artifact/trigger.png"
+        name: "triggerTexture"
         filter: NEAREST
