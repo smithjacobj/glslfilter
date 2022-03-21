@@ -4,8 +4,10 @@ render:
 stages:
   - fragmentShaderPath: "../demo/crt/demo_stage1.frag"
     textures:
-      - path: "C:/Users/jacobjms/Pictures/super-mario-bros.png"
-      - path: "C:/Users/jacobjms/Pictures/phosphor.png"
+      - path: "../demo/crt-singlestage/input.png"
+        name: "baseTexture"
+      - path: "../demo/crt-singlestage/phosphor.png"
+        name: "tileTexture"
   - fragmentShaderPath: "../demo/crt/demo_stage2.frag"
   - fragmentShaderPath: "../demo/crt/demo_stage3.frag"
   - fragmentShaderPath: "../demo/crt/demo_stage4.frag"
