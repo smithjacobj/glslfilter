@@ -9,17 +9,19 @@ import (
 )
 
 type Texture struct {
-	Data   *image.RGBA
-	Filter int32
+	Data        *image.RGBA
+	BindingName string
+	Filter      int32
 }
 
 type FilterStage struct {
 	program  uint32
-	textures []uint32
+	textures map[string]uint32
 }
 
 func NewFilterStage(fragmentShaderSource string, textures []Texture) (stage *FilterStage, err error) {
 	stage = new(FilterStage)
+	stage.textures = make(map[string]uint32)
 
 	stage.program, err = newProgram(fragmentShaderSource)
 	if err != nil {
@@ -32,7 +34,7 @@ func NewFilterStage(fragmentShaderSource string, textures []Texture) (stage *Fil
 
 	for _, texture := range textures {
 		textureName := createTexture(texture.Data, texture.Filter)
-		stage.textures = append(stage.textures, textureName)
+		stage.textures[texture.BindingName] = textureName
 	}
 
 	return stage, err

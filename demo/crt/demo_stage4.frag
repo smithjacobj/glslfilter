@@ -3,8 +3,7 @@
 #extension GL_ARB_explicit_uniform_location : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-layout(location = 0) uniform ivec2 _;
-layout(location = 1) in vec2 fragTexCoord;
+layout(location = 0) in vec2 fragTexCoord;
 layout(binding = 0) uniform sampler2D previousResult;
 
 layout(location = 0) out vec4 fragColor;

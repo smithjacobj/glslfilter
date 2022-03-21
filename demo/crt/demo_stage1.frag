@@ -3,8 +3,8 @@
 #extension GL_ARB_explicit_uniform_location : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-layout(location = 0) uniform ivec2 viewportSize;
-layout(location = 1) in vec2 fragTexCoord;
+layout(location = 0) in vec2 fragTexCoord;
+layout(location = 1) in vec2 viewportSize;
 layout(binding = 1) uniform sampler2D baseTexture;
 layout(binding = 2) uniform sampler2D tileTexture;
 
