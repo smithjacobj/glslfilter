@@ -1,0 +1,18 @@
+render:
+  width: ${width}
+  height: ${height}
+stages:
+  - fragmentShaderPath: "${script_path}/bloom_stage1.frag"
+    textures:
+      - path: "${source_path}"
+        name: "inputTexture"
+    uniforms:
+      - name: "threshold"
+        value: 0.5
+  - fragmentShaderPath: "${script_path}/bloom_stage2.frag"
+    textures:
+      - path: "${source_path}"
+        name: "inputTexture"
+    uniforms:
+      - name: "blurPixels"
+        value: 5.0
