@@ -1,0 +1,11 @@
+render:
+  width: ${width}
+  height: ${height}
+stages:
+  - fragmentShaderPath: "${script_path}/divergence.frag"
+    textures:
+      - path: "${source_path}"
+        name: "inputTexture"
+    uniforms:
+      - name: "threshold"
+        value: 0.5
