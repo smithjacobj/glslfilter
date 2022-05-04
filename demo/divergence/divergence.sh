@@ -2,13 +2,13 @@
 
 if [ -z $1 ]
 then
-  echo "Usage: bloom.sh <input-png-path>"
+  echo "Usage: divergence.sh <input-png-path>"
   exit 1
 fi
 
 script_path="$( dirname -- ${BASH_SOURCE} )"
 executable_path="${script_path}/../../glslfilter-glfw/glslfilter-glfw"
-filter_path="${script_path}/bloom.yml"
+filter_path="${script_path}/divergence.yml"
 
 cygpath_exists=! cygpath &> /dev/null
 
