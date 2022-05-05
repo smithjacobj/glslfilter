@@ -74,7 +74,7 @@ func main() {
 				})
 		}
 
-		stage, err := glslfilter.NewFilterStage(fragmentShaderSource, textures)
+		stage, err := glslfilter.NewFilterStage(fragmentShaderSource, textures, stageDefinition.Uniforms)
 		util.Invariant(err)
 
 		stages = append(stages, stage)

@@ -8,11 +8,13 @@ stages:
         name: "inputTexture"
     uniforms:
       - name: "colorFilters"
+        type: "buffer"
         value:
           yellow: [0.98, 0.87, 0.07]
           blue: [0, 0.62, 0.86]
           pink: [0.76, 0.25, 0.59]
       - name: "colorDivergencePx"
+        type: "buffer"
         value: 
           yellow: [-32,0]
           blue: [0,0]
