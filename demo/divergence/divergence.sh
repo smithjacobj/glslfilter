@@ -25,13 +25,11 @@ then
   exit 1
 fi
 
-input_width=$( identify -format '%[fx:w]' ${1} )
-input_height=$( identify -format '%[fx:h]' ${1} )
-let output_width=${input_width}*8
-let output_height=${input_height}*8
+width=$( identify -format '%[fx:w]' ${1} )
+height=$( identify -format '%[fx:h]' ${1} )
 
 sed "s%\${source_path}%${1}%g" $filter_path |
 sed "s%\${script_path}%${script_path}%g" |
-sed "s%\${width}%${output_width}%g" |
-sed "s%\${height}%${output_height}%g" |
+sed "s%\${width}%${width}%g" |
+sed "s%\${height}%${height}%g" |
 $executable_path
