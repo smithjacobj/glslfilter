@@ -16,7 +16,8 @@ type TextureFilterType int32
 type UniformType int
 
 const (
-	Float UniformType = iota
+	Invalid UniformType = iota
+	Float
 	FloatVec2
 	FloatVec3
 	FloatVec4
