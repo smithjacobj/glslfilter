@@ -9,12 +9,12 @@ layout(location = 0) in vec2 fragTexCoord;
 layout(location = 1) uniform ivec2 outputResolution;
 layout(binding = 0, location = 2) uniform sampler2D inputTexture;
 layout(location = 3) uniform int count;
-layout(std140, binding = 1, location = 4) uniform Colors {
+layout(std140, binding = 1, location = 4) uniform colorFilters {
     vec3 filters[MAX_COUNT];
-} colorFilters;
-layout(std140, binding = 2, location = 5) uniform Offsets {
+} _colorFilters;
+layout(std140, binding = 2, location = 5) uniform colorDivergencePx {
     ivec2 offsets[MAX_COUNT];
-} colorDivergencePx;
+} _colorDivergencePx;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -26,12 +26,12 @@ vec4 getDivergentColor(vec3 color, ivec2 offset) {
 }
 
 void main() {
-    if (colorFilters.filters.length() != colorDivergencePx.offsets.length()) {
+    if (_colorFilters.filters.length() != _colorDivergencePx.offsets.length()) {
         // TODO: indicate some sort of error
     } else {
         fragColor = vec4(0);
         for (int i = 0; i < count; i++) {
-            fragColor += getDivergentColor(colorFilters.filters[i], colorDivergencePx.offsets[i]);
+            fragColor += getDivergentColor(_colorFilters.filters[i], _colorDivergencePx.offsets[i]);
         }
     }
 }

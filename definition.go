@@ -2,9 +2,9 @@ package glslfilter
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
@@ -56,12 +56,15 @@ type Definition struct {
 	}
 }
 
-func LoadDefinitionFromStdin() (definition Definition, err error) {
-	definitionString, err := ioutil.ReadAll(os.Stdin)
+func LoadDefinitionFromFile(reader io.Reader) (definition Definition, err error) {
+	definitionString, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return definition, err
 	}
+	return LoadDefinition(definitionString)
+}
 
+func LoadDefinition(definitionString []byte) (definition Definition, err error) {
 	err = yaml.Unmarshal(definitionString, &definition)
 	if err != nil {
 		return definition, err

@@ -17,9 +17,8 @@ type Texture struct {
 }
 
 type Uniform struct {
-	Type       UniformType
-	Value      interface{}
-	BufferName uint32
+	Type  UniformType
+	Value interface{}
 }
 
 type FilterStage struct {
@@ -31,6 +30,7 @@ type FilterStage struct {
 func NewFilterStage(fragmentShaderSource string, textures []Texture, uniformDefinitions []UniformDefinition) (stage *FilterStage, err error) {
 	stage = new(FilterStage)
 	stage.textures = make(map[string]uint32)
+	stage.uniforms = make(map[string]*Uniform)
 
 	stage.program, err = newProgram(fragmentShaderSource)
 	if err != nil {
@@ -52,13 +52,9 @@ func NewFilterStage(fragmentShaderSource string, textures []Texture, uniformDefi
 		}
 		stage.uniforms[uniformDefinition.Name] = &uniform
 		if uniformDefinition.Type == Buffer {
-			uniform.createUniformBufferObject(uniformDefinition)
+			uniform.Value = uniform.createUniformBufferObject(uniformDefinition)
 		} else {
-			if isScalar(uniformDefinition.Value) {
-				uniform.Value = []interface{}{uniformDefinition.Value}
-			} else {
-				uniform.Value = uniformDefinition.Value
-			}
+			uniform.Value = normalizeUniformValue(uniformDefinition)
 		}
 	}
 
@@ -161,7 +157,7 @@ func compileShader(source string, shaderType uint32) (name uint32, err error) {
 }
 
 func locationNotFoundError(bindingName string) error {
-	return fmt.Errorf("binding %s not found", bindingName)
+	return fmt.Errorf("location %s not found", bindingName)
 }
 
 func (stage *FilterStage) bindDefinitionTextures() error {
@@ -184,111 +180,272 @@ func (stage *FilterStage) bindDefinitionTextures() error {
 
 func (stage *FilterStage) bindDefinitionUniforms() error {
 	for bindingName, uniform := range stage.uniforms {
-		location := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
-		if location == kGLLocationNotFound {
-			return locationNotFoundError(bindingName)
+		kind := reflect.TypeOf(uniform.Value).Kind()
+		if uniform.Type == Buffer {
+			if kind != reflect.Uint32 {
+				return fmt.Errorf("UBO should be specified as a UBO block binding (uint32)")
+			}
+
+			block := gl.GetUniformBlockIndex(stage.program, gl.Str(bindingName+"\x00"))
+			if block == gl.INVALID_INDEX {
+				return locationNotFoundError(bindingName)
+			}
+
+			gl.UniformBlockBinding(stage.program, block, uniform.Value.(uint32))
 		} else {
-			kind := reflect.TypeOf(uniform.Value).Kind()
-			if uniform.Type == Buffer {
-				if !(kind == reflect.Slice || kind == reflect.Struct) {
-					return fmt.Errorf("UBO should be normalized to a slice or struct")
-				}
+			if kind != reflect.Slice {
+				return fmt.Errorf("primitives should be normalized to a slice")
+			}
 
-				gl.Uniform1i(location, uniform.Value.(int32))
-			} else {
-				if kind != reflect.Slice {
-					return fmt.Errorf("primitives should be normalized to a slice")
-				}
+			location := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
+			if location == kGLLocationNotFound {
+				return locationNotFoundError(bindingName)
+			}
 
-				v := reflect.ValueOf(uniform.Value)
-				switch uniform.Type {
-				case Float:
-					gl.Uniform1f(
-						location,
-						float32(v.Index(0).Float()),
-					)
-				case FloatVec2:
-					gl.Uniform2f(
-						location,
-						float32(v.Index(0).Float()),
-						float32(v.Index(1).Float()),
-					)
-				case FloatVec3:
-					gl.Uniform3f(
-						location,
-						float32(v.Index(0).Float()),
-						float32(v.Index(1).Float()),
-						float32(v.Index(2).Float()),
-					)
-				case FloatVec4:
-					gl.Uniform4f(
-						location,
-						float32(v.Index(0).Float()),
-						float32(v.Index(1).Float()),
-						float32(v.Index(2).Float()),
-						float32(v.Index(3).Float()),
-					)
-				case Int:
-					gl.Uniform1i(
-						location,
-						int32(v.Index(0).Int()),
-					)
-				case IntVec2:
-					gl.Uniform2i(
-						location,
-						int32(v.Index(0).Int()),
-						int32(v.Index(1).Int()),
-					)
-				case IntVec3:
-					gl.Uniform3i(
-						location,
-						int32(v.Index(0).Int()),
-						int32(v.Index(1).Int()),
-						int32(v.Index(2).Int()),
-					)
-				case IntVec4:
-					gl.Uniform4i(
-						location,
-						int32(v.Index(0).Int()),
-						int32(v.Index(1).Int()),
-						int32(v.Index(2).Int()),
-						int32(v.Index(3).Int()),
-					)
-				case Uint:
-					gl.Uniform1ui(
-						location,
-						uint32(v.Index(0).Uint()),
-					)
-				case UintVec2:
-					gl.Uniform2ui(
-						location,
-						uint32(v.Index(0).Uint()),
-						uint32(v.Index(1).Uint()),
-					)
-				case UintVec3:
-					gl.Uniform3ui(
-						location,
-						uint32(v.Index(0).Uint()),
-						uint32(v.Index(1).Uint()),
-						uint32(v.Index(2).Uint()),
-					)
-				case UintVec4:
-					gl.Uniform4ui(
-						location,
-						uint32(v.Index(0).Uint()),
-						uint32(v.Index(1).Uint()),
-						uint32(v.Index(2).Uint()),
-						uint32(v.Index(3).Uint()),
-					)
-				default:
-					return fmt.Errorf("invalid uniform type specified")
-				}
+			switch uniform.Type {
+			case Float:
+				gl.Uniform1fv(
+					location,
+					1,
+					&uniform.Value.([]float32)[0],
+				)
+			case FloatVec2:
+				gl.Uniform2fv(
+					location,
+					2,
+					&uniform.Value.([]float32)[0],
+				)
+			case FloatVec3:
+				gl.Uniform3fv(
+					location,
+					3,
+					&uniform.Value.([]float32)[0],
+				)
+			case FloatVec4:
+				gl.Uniform4fv(
+					location,
+					4,
+					&uniform.Value.([]float32)[0],
+				)
+			case Int:
+				gl.Uniform1iv(
+					location,
+					1,
+					&uniform.Value.([]int32)[0],
+				)
+			case IntVec2:
+				gl.Uniform2iv(
+					location,
+					2,
+					&uniform.Value.([]int32)[0],
+				)
+			case IntVec3:
+				gl.Uniform3iv(
+					location,
+					3,
+					&uniform.Value.([]int32)[0],
+				)
+			case IntVec4:
+				gl.Uniform4iv(
+					location,
+					4,
+					&uniform.Value.([]int32)[0],
+				)
+			case Uint:
+				gl.Uniform1uiv(
+					location,
+					1,
+					&uniform.Value.([]uint32)[0],
+				)
+			case UintVec2:
+				gl.Uniform2uiv(
+					location,
+					2,
+					&uniform.Value.([]uint32)[0],
+				)
+			case UintVec3:
+				gl.Uniform3uiv(
+					location,
+					3,
+					&uniform.Value.([]uint32)[0],
+				)
+			case UintVec4:
+				gl.Uniform4uiv(
+					location,
+					4,
+					&uniform.Value.([]uint32)[0],
+				)
+			default:
+				return fmt.Errorf("invalid uniform type specified")
 			}
 		}
 	}
 	return nil
 }
 
-func isScalar(v interface{}) bool {
-	return reflect.TypeOf(v).ConvertibleTo(reflect.TypeOf(float32(0)))
+func normalizeUniformValue(definition UniformDefinition) (normed interface{}) {
+	scalarType := getScalarType(definition.Type)
+	switch scalarType {
+	case Float:
+		return normToFloat(definition)
+	case Int:
+		return normToInt(definition)
+	case Uint:
+		return normToUint(definition)
+	}
+	panic("normalizeUniformValue: invalid type specified")
+}
+
+func normToFloat(definition UniformDefinition) (normed []float32) {
+	switch definition.Value.(type) {
+	case float32:
+		return []float32{definition.Value.(float32)}
+	case []float32:
+		return definition.Value.([]float32)
+	case float64:
+		return []float32{float32(definition.Value.(float64))}
+	case []float64:
+		f64Slice := definition.Value.([]float64)
+		f32Slice := []float32{}
+		for _, v := range f64Slice {
+			f32Slice = append(f32Slice, float32(v))
+		}
+		return f32Slice
+	case int:
+		return []float32{float32(definition.Value.(int))}
+	case []int:
+		intSlice := definition.Value.([]int)
+		f32Slice := []float32{}
+		for _, v := range intSlice {
+			f32Slice = append(f32Slice, float32(v))
+		}
+		return f32Slice
+	case uint:
+		return []float32{float32(definition.Value.(uint))}
+	case []uint:
+		uintSlice := definition.Value.([]uint)
+		f32Slice := []float32{}
+		for _, v := range uintSlice {
+			f32Slice = append(f32Slice, float32(v))
+		}
+		return f32Slice
+	}
+	panic("normToFloat: unexpected type in bagging area")
+}
+
+func normToInt(definition UniformDefinition) (normed []int32) {
+	switch definition.Value.(type) {
+	case float32:
+		return []int32{int32(definition.Value.(float32))}
+	case []float32:
+		f32Slice := definition.Value.([]float32)
+		intSlice := []int32{}
+		for _, v := range f32Slice {
+			intSlice = append(intSlice, int32(v))
+		}
+		return intSlice
+	case float64:
+		return []int32{int32(definition.Value.(float64))}
+	case []float64:
+		f64Slice := definition.Value.([]float64)
+		intSlice := []int32{}
+		for _, v := range f64Slice {
+			intSlice = append(intSlice, int32(v))
+		}
+		return intSlice
+	case int:
+		return []int32{int32(definition.Value.(int))}
+	case []int:
+		intSlice := definition.Value.([]int)
+		int32Slice := []int32{}
+		for _, v := range intSlice {
+			int32Slice = append(int32Slice, int32(v))
+		}
+		return int32Slice
+	case uint:
+		return []int32{int32(definition.Value.(uint))}
+	case []uint:
+		uintSlice := definition.Value.([]uint)
+		intSlice := []int32{}
+		for _, v := range uintSlice {
+			intSlice = append(intSlice, int32(v))
+		}
+		return intSlice
+	}
+	panic("normToInt: unexpected type in bagging area")
+}
+
+func normToUint(definition UniformDefinition) (normed []uint32) {
+	switch definition.Value.(type) {
+	case float32:
+		return []uint32{uint32(definition.Value.(float32))}
+	case []float32:
+		f32Slice := definition.Value.([]float32)
+		uintSlice := []uint32{}
+		for _, v := range f32Slice {
+			uintSlice = append(uintSlice, uint32(v))
+		}
+		return uintSlice
+	case float64:
+		return []uint32{uint32(definition.Value.(float64))}
+	case []float64:
+		f64Slice := definition.Value.([]float64)
+		uintSlice := []uint32{}
+		for _, v := range f64Slice {
+			uintSlice = append(uintSlice, uint32(v))
+		}
+		return uintSlice
+	case int:
+		return []uint32{uint32(definition.Value.(int))}
+	case []int:
+		intSlice := definition.Value.([]int)
+		uintSlice := []uint32{}
+		for _, v := range intSlice {
+			uintSlice = append(uintSlice, uint32(v))
+		}
+		return uintSlice
+	case uint:
+		return []uint32{uint32(definition.Value.(uint))}
+	case []uint:
+		uintSlice := definition.Value.([]uint)
+		uint32Slice := []uint32{}
+		for _, v := range uintSlice {
+			uint32Slice = append(uint32Slice, uint32(v))
+		}
+		return uint32Slice
+	}
+	panic("normToUint: unexpected type in bagging area")
+}
+
+func getScalarType(typ UniformType) (scalarType UniformType) {
+	switch typ {
+	case Float:
+		fallthrough
+	case FloatVec2:
+		fallthrough
+	case FloatVec3:
+		fallthrough
+	case FloatVec4:
+		return Float
+
+	case Int:
+		fallthrough
+	case IntVec2:
+		fallthrough
+	case IntVec3:
+		fallthrough
+	case IntVec4:
+		return Int
+
+	case Uint:
+		fallthrough
+	case UintVec2:
+		fallthrough
+	case UintVec3:
+		fallthrough
+	case UintVec4:
+		return Uint
+	}
+
+	return Invalid
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"image"
 	"image/png"
 	_ "image/png"
@@ -14,6 +15,13 @@ import (
 )
 
 const AppName = "GLSL Filter"
+
+var definitionFilePath string
+
+func init() {
+	flag.StringVar(&definitionFilePath, "definitionFile", "", "specify a definition file instead of stdin")
+	flag.Parse()
+}
 
 func init() {
 	// GLFW event handling must run on the main OS thread
@@ -46,7 +54,13 @@ func main() {
 	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
 	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
 
-	definition, err := glslfilter.LoadDefinitionFromStdin()
+	file := os.Stdin
+	if len(definitionFilePath) > 0 {
+		var err error
+		file, err = os.Open(definitionFilePath)
+		util.Invariant(err)
+	}
+	definition, err := glslfilter.LoadDefinitionFromFile(file)
 	util.Invariant(err)
 
 	window, err := glfw.CreateWindow(definition.Render.Width, definition.Render.Height, AppName, nil, nil)
