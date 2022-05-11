@@ -3,6 +3,7 @@ package glslfilter
 import (
 	"fmt"
 	"image"
+	"math"
 	"reflect"
 	"strings"
 	"unsafe"
@@ -84,16 +85,8 @@ func (uniform *Uniform) createUniformBufferObject(definition UniformDefinition) 
 	gl.CreateBuffers(1, &uboName)
 
 	v := reflect.ValueOf(definition.Value)
-	switch v.Kind() {
-	case reflect.Slice:
-		header := (*reflect.SliceHeader)(unsafe.Pointer(v.Pointer()))
-		gl.BufferData(uboName, header.Len, gl.Ptr(header.Data), gl.UNIFORM_BUFFER)
-	case reflect.Struct:
-		gl.BufferData(uboName, int(v.Type().Size()), gl.Ptr(v.Pointer()), gl.UNIFORM_BUFFER)
-	default:
-		// we don't support maps because they don't have ordering guarantees
-		panic("unexpected datatype for createUniformBufferObject")
-	}
+	byts := linearize(v)
+	gl.BufferData(uboName, len(byts), gl.Ptr(&byts[0]), gl.UNIFORM_BUFFER)
 
 	return uboName
 }
@@ -448,4 +441,41 @@ func getScalarType(typ UniformType) (scalarType UniformType) {
 	}
 
 	return Invalid
+}
+
+func linearize(v reflect.Value) (buffer []byte) {
+	if v.Kind() != reflect.Slice {
+		panic("unexpected datatype for UBO")
+	}
+
+	if v.Len() <= 0 {
+		return []byte{}
+	}
+
+	v0 := v.Index(0)
+	// dig out the wrapped value if necessary
+	for v0.Kind() == reflect.Interface {
+		v0 = reflect.ValueOf(v0.Interface())
+	}
+
+	// recurse into multidimensional slices
+	if v0.Kind() == reflect.Slice {
+		buffer = append(buffer, linearize(v0)...)
+	} else if v0.CanFloat() {
+		bits := math.Float32bits(float32(v0.Float()))
+		// use host endianness by using unsafe to emulate reinterpret_cast
+		byts := *(*[4]byte)(unsafe.Pointer(&bits))
+		buffer = append(buffer, byts[:]...)
+	} else if v0.CanInt() {
+		v0i := int32(v0.Int())
+		byts := *(*[4]byte)(unsafe.Pointer(&v0i))
+		// use host endianness by using unsafe to emulate reinterpret_cast
+		buffer = append(buffer, byts[:]...)
+	} else if v0.CanUint() {
+		v0u := uint32(v0.Uint())
+		byts := *(*[4]byte)(unsafe.Pointer(&v0u))
+		buffer = append(buffer, byts[:]...)
+	}
+
+	return buffer
 }
