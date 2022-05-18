@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
+	"github.com/smithjacobj/glslfilter/util"
 )
 
 type Texture struct {
@@ -52,7 +53,7 @@ func NewFilterStage(fragmentShaderSource string, textures []Texture, uniformDefi
 			Type: uniformDefinition.Type,
 		}
 		stage.uniforms[uniformDefinition.Name] = &uniform
-		if uniformDefinition.Type == Buffer {
+		if uniformDefinition.Type.IsBuffer {
 			uniform.Value = uniform.createUniformBufferObject(uniformDefinition)
 		} else {
 			uniform.Value = normalizeUniformValue(uniformDefinition)
@@ -85,7 +86,7 @@ func (uniform *Uniform) createUniformBufferObject(definition UniformDefinition) 
 	gl.CreateBuffers(1, &uboName)
 
 	v := reflect.ValueOf(definition.Value)
-	byts := linearize(v)
+	byts := linearize(v, definition.Type)
 	gl.BufferData(uboName, len(byts), gl.Ptr(&byts[0]), gl.UNIFORM_BUFFER)
 
 	return uboName
@@ -174,7 +175,7 @@ func (stage *FilterStage) bindDefinitionTextures() error {
 func (stage *FilterStage) bindDefinitionUniforms() error {
 	for bindingName, uniform := range stage.uniforms {
 		kind := reflect.TypeOf(uniform.Value).Kind()
-		if uniform.Type == Buffer {
+		if uniform.Type.IsBuffer {
 			if kind != reflect.Uint32 {
 				return fmt.Errorf("UBO should be specified as a UBO block binding (uint32)")
 			}
@@ -195,79 +196,89 @@ func (stage *FilterStage) bindDefinitionUniforms() error {
 				return locationNotFoundError(bindingName)
 			}
 
-			switch uniform.Type {
+			switch uniform.Type.ScalarType {
 			case Float:
-				gl.Uniform1fv(
-					location,
-					1,
-					&uniform.Value.([]float32)[0],
-				)
-			case FloatVec2:
-				gl.Uniform2fv(
-					location,
-					2,
-					&uniform.Value.([]float32)[0],
-				)
-			case FloatVec3:
-				gl.Uniform3fv(
-					location,
-					3,
-					&uniform.Value.([]float32)[0],
-				)
-			case FloatVec4:
-				gl.Uniform4fv(
-					location,
-					4,
-					&uniform.Value.([]float32)[0],
-				)
+				switch uniform.Type.VectorSize {
+				case 0:
+					gl.Uniform1fv(
+						location,
+						1,
+						&uniform.Value.([]float32)[0],
+					)
+				case 2:
+					gl.Uniform2fv(
+						location,
+						2,
+						&uniform.Value.([]float32)[0],
+					)
+				case 3:
+					gl.Uniform3fv(
+						location,
+						3,
+						&uniform.Value.([]float32)[0],
+					)
+				case 4:
+					gl.Uniform4fv(
+						location,
+						4,
+						&uniform.Value.([]float32)[0],
+					)
+				}
 			case Int:
-				gl.Uniform1iv(
-					location,
-					1,
-					&uniform.Value.([]int32)[0],
-				)
-			case IntVec2:
-				gl.Uniform2iv(
-					location,
-					2,
-					&uniform.Value.([]int32)[0],
-				)
-			case IntVec3:
-				gl.Uniform3iv(
-					location,
-					3,
-					&uniform.Value.([]int32)[0],
-				)
-			case IntVec4:
-				gl.Uniform4iv(
-					location,
-					4,
-					&uniform.Value.([]int32)[0],
-				)
+				switch uniform.Type.VectorSize {
+				case 0:
+					gl.Uniform1iv(
+						location,
+						1,
+						&uniform.Value.([]int32)[0],
+					)
+				case 2:
+					gl.Uniform2iv(
+						location,
+						2,
+						&uniform.Value.([]int32)[0],
+					)
+				case 3:
+					gl.Uniform3iv(
+						location,
+						3,
+						&uniform.Value.([]int32)[0],
+					)
+				case 4:
+					gl.Uniform4iv(
+						location,
+						4,
+						&uniform.Value.([]int32)[0],
+					)
+				}
 			case Uint:
-				gl.Uniform1uiv(
-					location,
-					1,
-					&uniform.Value.([]uint32)[0],
-				)
-			case UintVec2:
-				gl.Uniform2uiv(
-					location,
-					2,
-					&uniform.Value.([]uint32)[0],
-				)
-			case UintVec3:
-				gl.Uniform3uiv(
-					location,
-					3,
-					&uniform.Value.([]uint32)[0],
-				)
-			case UintVec4:
-				gl.Uniform4uiv(
-					location,
-					4,
-					&uniform.Value.([]uint32)[0],
-				)
+				switch uniform.Type.VectorSize {
+				case 0:
+					gl.Uniform1uiv(
+						location,
+						1,
+						&uniform.Value.([]uint32)[0],
+					)
+				case 2:
+					gl.Uniform2uiv(
+						location,
+						2,
+						&uniform.Value.([]uint32)[0],
+					)
+				case 3:
+					gl.Uniform3uiv(
+						location,
+						3,
+						&uniform.Value.([]uint32)[0],
+					)
+				case 4:
+					gl.Uniform4uiv(
+						location,
+						4,
+						&uniform.Value.([]uint32)[0],
+					)
+				}
+
 			default:
 				return fmt.Errorf("invalid uniform type specified")
 			}
@@ -277,46 +288,49 @@ func (stage *FilterStage) bindDefinitionUniforms() error {
 }
 
 func normalizeUniformValue(definition UniformDefinition) (normed interface{}) {
-	scalarType := getScalarType(definition.Type)
-	switch scalarType {
+	return normalizeValue(definition.Value, definition.Type.ScalarType)
+}
+
+func normalizeValue(v interface{}, typ ScalarTypeName) (normed interface{}) {
+	switch typ {
 	case Float:
-		return normToFloat(definition)
+		return normToFloat(v)
 	case Int:
-		return normToInt(definition)
+		return normToInt(v)
 	case Uint:
-		return normToUint(definition)
+		return normToUint(v)
 	}
 	panic("normalizeUniformValue: invalid type specified")
 }
 
-func normToFloat(definition UniformDefinition) (normed []float32) {
-	switch definition.Value.(type) {
+func normToFloat(v interface{}) (normed []float32) {
+	switch v.(type) {
 	case float32:
-		return []float32{definition.Value.(float32)}
+		return []float32{v.(float32)}
 	case []float32:
-		return definition.Value.([]float32)
+		return v.([]float32)
 	case float64:
-		return []float32{float32(definition.Value.(float64))}
+		return []float32{float32(v.(float64))}
 	case []float64:
-		f64Slice := definition.Value.([]float64)
+		f64Slice := v.([]float64)
 		f32Slice := []float32{}
 		for _, v := range f64Slice {
 			f32Slice = append(f32Slice, float32(v))
 		}
 		return f32Slice
 	case int:
-		return []float32{float32(definition.Value.(int))}
+		return []float32{float32(v.(int))}
 	case []int:
-		intSlice := definition.Value.([]int)
+		intSlice := v.([]int)
 		f32Slice := []float32{}
 		for _, v := range intSlice {
 			f32Slice = append(f32Slice, float32(v))
 		}
 		return f32Slice
 	case uint:
-		return []float32{float32(definition.Value.(uint))}
+		return []float32{float32(v.(uint))}
 	case []uint:
-		uintSlice := definition.Value.([]uint)
+		uintSlice := v.([]uint)
 		f32Slice := []float32{}
 		for _, v := range uintSlice {
 			f32Slice = append(f32Slice, float32(v))
@@ -326,39 +340,39 @@ func normToFloat(definition UniformDefinition) (normed []float32) {
 	panic("normToFloat: unexpected type in bagging area")
 }
 
-func normToInt(definition UniformDefinition) (normed []int32) {
-	switch definition.Value.(type) {
+func normToInt(v interface{}) (normed []int32) {
+	switch v.(type) {
 	case float32:
-		return []int32{int32(definition.Value.(float32))}
+		return []int32{int32(v.(float32))}
 	case []float32:
-		f32Slice := definition.Value.([]float32)
+		f32Slice := v.([]float32)
 		intSlice := []int32{}
 		for _, v := range f32Slice {
 			intSlice = append(intSlice, int32(v))
 		}
 		return intSlice
 	case float64:
-		return []int32{int32(definition.Value.(float64))}
+		return []int32{int32(v.(float64))}
 	case []float64:
-		f64Slice := definition.Value.([]float64)
+		f64Slice := v.([]float64)
 		intSlice := []int32{}
 		for _, v := range f64Slice {
 			intSlice = append(intSlice, int32(v))
 		}
 		return intSlice
 	case int:
-		return []int32{int32(definition.Value.(int))}
+		return []int32{int32(v.(int))}
 	case []int:
-		intSlice := definition.Value.([]int)
+		intSlice := v.([]int)
 		int32Slice := []int32{}
 		for _, v := range intSlice {
 			int32Slice = append(int32Slice, int32(v))
 		}
 		return int32Slice
 	case uint:
-		return []int32{int32(definition.Value.(uint))}
+		return []int32{int32(v.(uint))}
 	case []uint:
-		uintSlice := definition.Value.([]uint)
+		uintSlice := v.([]uint)
 		intSlice := []int32{}
 		for _, v := range uintSlice {
 			intSlice = append(intSlice, int32(v))
@@ -368,39 +382,39 @@ func normToInt(definition UniformDefinition) (normed []int32) {
 	panic("normToInt: unexpected type in bagging area")
 }
 
-func normToUint(definition UniformDefinition) (normed []uint32) {
-	switch definition.Value.(type) {
+func normToUint(v interface{}) (normed []uint32) {
+	switch v.(type) {
 	case float32:
-		return []uint32{uint32(definition.Value.(float32))}
+		return []uint32{uint32(v.(float32))}
 	case []float32:
-		f32Slice := definition.Value.([]float32)
+		f32Slice := v.([]float32)
 		uintSlice := []uint32{}
 		for _, v := range f32Slice {
 			uintSlice = append(uintSlice, uint32(v))
 		}
 		return uintSlice
 	case float64:
-		return []uint32{uint32(definition.Value.(float64))}
+		return []uint32{uint32(v.(float64))}
 	case []float64:
-		f64Slice := definition.Value.([]float64)
+		f64Slice := v.([]float64)
 		uintSlice := []uint32{}
 		for _, v := range f64Slice {
 			uintSlice = append(uintSlice, uint32(v))
 		}
 		return uintSlice
 	case int:
-		return []uint32{uint32(definition.Value.(int))}
+		return []uint32{uint32(v.(int))}
 	case []int:
-		intSlice := definition.Value.([]int)
+		intSlice := v.([]int)
 		uintSlice := []uint32{}
 		for _, v := range intSlice {
 			uintSlice = append(uintSlice, uint32(v))
 		}
 		return uintSlice
 	case uint:
-		return []uint32{uint32(definition.Value.(uint))}
+		return []uint32{uint32(v.(uint))}
 	case []uint:
-		uintSlice := definition.Value.([]uint)
+		uintSlice := v.([]uint)
 		uint32Slice := []uint32{}
 		for _, v := range uintSlice {
 			uint32Slice = append(uint32Slice, uint32(v))
@@ -410,72 +424,79 @@ func normToUint(definition UniformDefinition) (normed []uint32) {
 	panic("normToUint: unexpected type in bagging area")
 }
 
-func getScalarType(typ UniformType) (scalarType UniformType) {
-	switch typ {
-	case Float:
-		fallthrough
-	case FloatVec2:
-		fallthrough
-	case FloatVec3:
-		fallthrough
-	case FloatVec4:
-		return Float
-
-	case Int:
-		fallthrough
-	case IntVec2:
-		fallthrough
-	case IntVec3:
-		fallthrough
-	case IntVec4:
-		return Int
-
-	case Uint:
-		fallthrough
-	case UintVec2:
-		fallthrough
-	case UintVec3:
-		fallthrough
-	case UintVec4:
-		return Uint
-	}
-
-	return Invalid
+func getScalarType(typ UniformType) (scalarType ScalarTypeName) {
+	return typ.ScalarType
 }
 
-func linearize(v reflect.Value) (buffer []byte) {
+func linearize(v reflect.Value, typ UniformType) (buffer []byte) {
 	if v.Kind() != reflect.Slice {
 		panic("unexpected datatype for UBO")
 	}
 
-	if v.Len() <= 0 {
+	length := v.Len()
+
+	if length <= 0 {
 		return []byte{}
 	}
 
-	v0 := v.Index(0)
-	// dig out the wrapped value if necessary
-	for v0.Kind() == reflect.Interface {
-		v0 = reflect.ValueOf(v0.Interface())
+	for i := 0; i < length; i++ {
+		vSub := reflect.ValueOf(v.Index(i).Interface())
+		if vSub.Kind() == reflect.Slice {
+			buffer = alignStd140(buffer, typ)
+			buffer = append(buffer, linearize(vSub, typ)...)
+		} else {
+			byts := [4]byte{}
+			switch typ.ScalarType {
+			case Float:
+				vFloat := math.Float32bits(normToFloat(vSub.Interface())[0])
+				byts = *(*[4]byte)(unsafe.Pointer(&vFloat))
+				buffer = append(buffer, byts[:]...)
+			case Int:
+				vInt := normToInt(vSub.Interface())[0]
+				byts = *(*[4]byte)(unsafe.Pointer(&vInt))
+				buffer = append(buffer, byts[:]...)
+			case Uint:
+				vUint := normToInt(vSub.Interface())[0]
+				byts = *(*[4]byte)(unsafe.Pointer(&vUint))
+				buffer = append(buffer, byts[:]...)
+			}
+		}
 	}
 
-	// recurse into multidimensional slices
-	if v0.Kind() == reflect.Slice {
-		buffer = append(buffer, linearize(v0)...)
-	} else if v0.CanFloat() {
-		bits := math.Float32bits(float32(v0.Float()))
-		// use host endianness by using unsafe to emulate reinterpret_cast
-		byts := *(*[4]byte)(unsafe.Pointer(&bits))
-		buffer = append(buffer, byts[:]...)
-	} else if v0.CanInt() {
-		v0i := int32(v0.Int())
-		byts := *(*[4]byte)(unsafe.Pointer(&v0i))
-		// use host endianness by using unsafe to emulate reinterpret_cast
-		buffer = append(buffer, byts[:]...)
-	} else if v0.CanUint() {
-		v0u := uint32(v0.Uint())
-		byts := *(*[4]byte)(unsafe.Pointer(&v0u))
-		buffer = append(buffer, byts[:]...)
-	}
+	return buffer
+}
 
+func alignStd140(buffer []byte, typ UniformType) []byte {
+	const kWordLen = 4
+	const kVec2Alignment = kWordLen * 2
+	const kVec34Alignment = kWordLen * 4
+
+	util.Invariant(len(buffer)%kWordLen == 0) // all values are 32-bit aligned, flag this here
+
+	neededPadding := 0
+	switch typ.VectorSize {
+	case 0:
+	case 2:
+		mod := len(buffer) % kVec2Alignment
+		if mod == kVec2Alignment {
+			neededPadding = 0
+		} else {
+			neededPadding = kVec2Alignment - mod
+		}
+	case 3:
+		fallthrough
+	case 4:
+		mod := len(buffer) % kVec34Alignment
+		if mod == kVec34Alignment {
+			neededPadding = 0
+		} else {
+			neededPadding = kVec34Alignment - mod
+		}
+	default:
+		panic("unexpected vector size")
+	}
+	for i := 0; i < neededPadding; i++ {
+		buffer = append(buffer, 0)
+	}
 	return buffer
 }
