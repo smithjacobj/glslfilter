@@ -217,6 +217,11 @@ func normToUint(v interface{}) (normed []uint32) {
 
 func validateTypeLength(v interface{}, typ UniformType) {
 	vValue := reflect.ValueOf(v)
+	correctedSize := typ.VectorSize
+	if correctedSize == 0 {
+		// scalars are 0, but will have a 1-entry slice due to normalization
+		correctedSize = 1
+	}
 	util.Invariant(vValue.Kind() == reflect.Slice)
-	util.Invariant(vValue.Len() == typ.VectorSize)
+	util.Invariant(vValue.Len() == correctedSize)
 }
