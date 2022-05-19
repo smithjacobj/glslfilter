@@ -3,10 +3,8 @@ package glslfilter
 import (
 	"fmt"
 	"image"
-	"math"
 	"reflect"
 	"strings"
-	"unsafe"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/smithjacobj/glslfilter/util"
@@ -53,11 +51,7 @@ func NewFilterStage(fragmentShaderSource string, textures []Texture, uniformDefi
 			Type: uniformDefinition.Type,
 		}
 		stage.uniforms[uniformDefinition.Name] = &uniform
-		if uniformDefinition.Type.IsBuffer {
-			uniform.Value = uniform.createUniformBufferObject(uniformDefinition)
-		} else {
-			uniform.Value = normalizeUniformValue(uniformDefinition)
-		}
+		uniform.Value = normalizeUniformValue(uniformDefinition)
 	}
 
 	return stage, err
@@ -80,16 +74,6 @@ func createTexture(texture *image.RGBA, filter int32) (texName uint32) {
 	gl.TextureParameteri(texName, gl.TEXTURE_WRAP_T, gl.REPEAT)
 
 	return texName
-}
-
-func (uniform *Uniform) createUniformBufferObject(definition UniformDefinition) (uboName uint32) {
-	gl.CreateBuffers(1, &uboName)
-
-	v := reflect.ValueOf(definition.Value)
-	byts := linearize(v, definition.Type)
-	gl.BufferData(uboName, len(byts), gl.Ptr(&byts[0]), gl.UNIFORM_BUFFER)
-
-	return uboName
 }
 
 func newProgram(fragmentShaderSource string) (name uint32, err error) {
@@ -150,20 +134,20 @@ func compileShader(source string, shaderType uint32) (name uint32, err error) {
 	return shader, nil
 }
 
-func locationNotFoundError(bindingName string) error {
-	return fmt.Errorf("location %s not found", bindingName)
+func layoutNotFoundError(layoutName string, bindingName string) error {
+	return fmt.Errorf("location for %s not found", bindingName)
 }
 
 func (stage *FilterStage) bindDefinitionTextures() error {
 	for bindingName, texture := range stage.textures {
 		location := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
 		if location == kGLLocationNotFound {
-			return locationNotFoundError(bindingName)
+			return layoutNotFoundError("location", bindingName)
 		} else {
-			var binding int32 = -1
+			var binding int32 = kGLLocationNotFound
 			gl.GetUniformiv(stage.program, location, &binding)
 			if binding == kGLLocationNotFound {
-				return fmt.Errorf("binding %s not found", bindingName)
+				return layoutNotFoundError("binding", bindingName)
 			} else {
 				gl.BindTextureUnit(uint32(binding), texture)
 			}
@@ -173,132 +157,182 @@ func (stage *FilterStage) bindDefinitionTextures() error {
 }
 
 func (stage *FilterStage) bindDefinitionUniforms() error {
+	// TODO: target for optimization if necessary; could linearize and copy over arrays as a single buffer op instead.
 	for bindingName, uniform := range stage.uniforms {
-		kind := reflect.TypeOf(uniform.Value).Kind()
-		if uniform.Type.IsBuffer {
-			if kind != reflect.Uint32 {
-				return fmt.Errorf("UBO should be specified as a UBO block binding (uint32)")
+		switch uniform.Value.(type) {
+		case [][]float32:
+			for i, v := range uniform.Value.([][]float32) {
+				stage.bindUniform(bindingName, i, uniform.Type, v)
 			}
-
-			block := gl.GetUniformBlockIndex(stage.program, gl.Str(bindingName+"\x00"))
-			if block == gl.INVALID_INDEX {
-				return locationNotFoundError(bindingName)
+		case [][]int32:
+			for i, v := range uniform.Value.([][]int32) {
+				stage.bindUniform(bindingName, i, uniform.Type, v)
 			}
-
-			gl.UniformBlockBinding(stage.program, block, uniform.Value.(uint32))
-		} else {
-			if kind != reflect.Slice {
-				return fmt.Errorf("primitives should be normalized to a slice")
+		case [][]uint32:
+			for i, v := range uniform.Value.([][]uint32) {
+				stage.bindUniform(bindingName, i, uniform.Type, v)
 			}
-
-			location := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
-			if location == kGLLocationNotFound {
-				return locationNotFoundError(bindingName)
-			}
-
-			switch uniform.Type.ScalarType {
-			case Float:
-				switch uniform.Type.VectorSize {
-				case 0:
-					gl.Uniform1fv(
-						location,
-						1,
-						&uniform.Value.([]float32)[0],
-					)
-				case 2:
-					gl.Uniform2fv(
-						location,
-						2,
-						&uniform.Value.([]float32)[0],
-					)
-				case 3:
-					gl.Uniform3fv(
-						location,
-						3,
-						&uniform.Value.([]float32)[0],
-					)
-				case 4:
-					gl.Uniform4fv(
-						location,
-						4,
-						&uniform.Value.([]float32)[0],
-					)
-				}
-			case Int:
-				switch uniform.Type.VectorSize {
-				case 0:
-					gl.Uniform1iv(
-						location,
-						1,
-						&uniform.Value.([]int32)[0],
-					)
-				case 2:
-					gl.Uniform2iv(
-						location,
-						2,
-						&uniform.Value.([]int32)[0],
-					)
-				case 3:
-					gl.Uniform3iv(
-						location,
-						3,
-						&uniform.Value.([]int32)[0],
-					)
-				case 4:
-					gl.Uniform4iv(
-						location,
-						4,
-						&uniform.Value.([]int32)[0],
-					)
-				}
-			case Uint:
-				switch uniform.Type.VectorSize {
-				case 0:
-					gl.Uniform1uiv(
-						location,
-						1,
-						&uniform.Value.([]uint32)[0],
-					)
-				case 2:
-					gl.Uniform2uiv(
-						location,
-						2,
-						&uniform.Value.([]uint32)[0],
-					)
-				case 3:
-					gl.Uniform3uiv(
-						location,
-						3,
-						&uniform.Value.([]uint32)[0],
-					)
-				case 4:
-					gl.Uniform4uiv(
-						location,
-						4,
-						&uniform.Value.([]uint32)[0],
-					)
-				}
-
-			default:
-				return fmt.Errorf("invalid uniform type specified")
-			}
+		default:
+			return fmt.Errorf("non-normalized uniform value")
 		}
 	}
 	return nil
 }
 
+func (stage *FilterStage) bindUniform(baseBindingName string, index int, typ UniformType, v interface{}) error {
+	bindingName := baseBindingName
+	if index > 0 {
+		bindingName = fmt.Sprintf("%s[%d]", bindingName, index)
+	}
+
+	location := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
+	if location == kGLLocationNotFound {
+		return layoutNotFoundError("location", bindingName)
+	}
+
+	if err := setUniformComponent(location, typ.ScalarType, typ.VectorSize, v); err != nil {
+		return err
+	}
+	return nil
+}
+
+func setUniformComponent(location int32, scalarType ScalarTypeName, vectorSize int, v interface{}) error {
+	switch scalarType {
+	case Float:
+		switch vectorSize {
+		case 0:
+			gl.Uniform1fv(
+				location,
+				1,
+				&v.([]float32)[0],
+			)
+		case 2:
+			gl.Uniform2fv(
+				location,
+				1,
+				&v.([]float32)[0],
+			)
+		case 3:
+			gl.Uniform3fv(
+				location,
+				1,
+				&v.([]float32)[0],
+			)
+		case 4:
+			gl.Uniform4fv(
+				location,
+				1,
+				&v.([]float32)[0],
+			)
+		}
+	case Int:
+		switch vectorSize {
+		case 0:
+			gl.Uniform1iv(
+				location,
+				1,
+				&v.([]int32)[0],
+			)
+		case 2:
+			gl.Uniform2iv(
+				location,
+				1,
+				&v.([]int32)[0],
+			)
+		case 3:
+			gl.Uniform3iv(
+				location,
+				1,
+				&v.([]int32)[0],
+			)
+		case 4:
+			gl.Uniform4iv(
+				location,
+				1,
+				&v.([]int32)[0],
+			)
+		}
+	case Uint:
+		switch vectorSize {
+		case 0:
+			gl.Uniform1uiv(
+				location,
+				1,
+				&v.([]uint32)[0],
+			)
+		case 2:
+			gl.Uniform2uiv(
+				location,
+				1,
+				&v.([]uint32)[0],
+			)
+		case 3:
+			gl.Uniform3uiv(
+				location,
+				1,
+				&v.([]uint32)[0],
+			)
+		case 4:
+			gl.Uniform4uiv(
+				location,
+				1,
+				&v.([]uint32)[0],
+			)
+		}
+
+	default:
+		return fmt.Errorf("invalid uniform type specified")
+	}
+	return nil
+}
+
 func normalizeUniformValue(definition UniformDefinition) (normed interface{}) {
-	return normalizeValue(definition.Value, definition.Type.ScalarType)
+	if definition.Type.IsArray {
+		return normalizeArray(definition.Value, definition.Type.ScalarType)
+	} else {
+		return normalizeValue(definition.Value, definition.Type.ScalarType)
+	}
+}
+
+func normalizeArray(v interface{}, typ ScalarTypeName) (normed interface{}) {
+	vValue := reflect.ValueOf(v)
+	util.Invariant(vValue.Kind() == reflect.Slice)
+
+	length := vValue.Len()
+
+	switch typ {
+	case Float:
+		var float2D [][]float32
+		for i := 0; i < length; i++ {
+			fmt.Println(vValue.Index(i).Interface())
+			float2D = append(float2D, normToFloat(vValue.Index(i).Interface()))
+		}
+		normed = float2D
+	case Int:
+		var int2D [][]int32
+		for i := 0; i < length; i++ {
+			int2D = append(int2D, normToInt(vValue.Index(i).Interface()))
+		}
+		normed = int2D
+	case Uint:
+		var uint2D [][]uint32
+		for i := 0; i < length; i++ {
+			uint2D = append(uint2D, normToUint(vValue.Index(i).Interface()))
+		}
+		normed = uint2D
+	}
+
+	return normed
 }
 
 func normalizeValue(v interface{}, typ ScalarTypeName) (normed interface{}) {
 	switch typ {
 	case Float:
-		return normToFloat(v)
+		return [][]float32{normToFloat(v)}
 	case Int:
-		return normToInt(v)
+		return [][]int32{normToInt(v)}
 	case Uint:
-		return normToUint(v)
+		return [][]uint32{normToUint(v)}
 	}
 	panic("normalizeUniformValue: invalid type specified")
 }
@@ -336,8 +370,17 @@ func normToFloat(v interface{}) (normed []float32) {
 			f32Slice = append(f32Slice, float32(v))
 		}
 		return f32Slice
+	case []interface{}:
+		// special case from reflection
+		interfaceSlice := v.([]interface{})
+		f32Slice := []float32{}
+		for _, v := range interfaceSlice {
+			f32Slice = append(f32Slice, normToFloat(v)...)
+		}
+		return f32Slice
 	}
-	panic("normToFloat: unexpected type in bagging area")
+	panicMsg := fmt.Sprintf("normToFloat: unexpected type %s in bagging area", reflect.TypeOf(v))
+	panic(panicMsg)
 }
 
 func normToInt(v interface{}) (normed []int32) {
@@ -378,8 +421,17 @@ func normToInt(v interface{}) (normed []int32) {
 			intSlice = append(intSlice, int32(v))
 		}
 		return intSlice
+	case []interface{}:
+		// special case from reflection
+		interfaceSlice := v.([]interface{})
+		int32Slice := []int32{}
+		for _, v := range interfaceSlice {
+			int32Slice = append(int32Slice, normToInt(v)...)
+		}
+		return int32Slice
 	}
-	panic("normToInt: unexpected type in bagging area")
+	panicMsg := fmt.Sprintf("normToInt: unexpected type %s in bagging area", reflect.TypeOf(v))
+	panic(panicMsg)
 }
 
 func normToUint(v interface{}) (normed []uint32) {
@@ -420,83 +472,15 @@ func normToUint(v interface{}) (normed []uint32) {
 			uint32Slice = append(uint32Slice, uint32(v))
 		}
 		return uint32Slice
-	}
-	panic("normToUint: unexpected type in bagging area")
-}
-
-func getScalarType(typ UniformType) (scalarType ScalarTypeName) {
-	return typ.ScalarType
-}
-
-func linearize(v reflect.Value, typ UniformType) (buffer []byte) {
-	if v.Kind() != reflect.Slice {
-		panic("unexpected datatype for UBO")
-	}
-
-	length := v.Len()
-
-	if length <= 0 {
-		return []byte{}
-	}
-
-	for i := 0; i < length; i++ {
-		vSub := reflect.ValueOf(v.Index(i).Interface())
-		if vSub.Kind() == reflect.Slice {
-			buffer = alignStd140(buffer, typ)
-			buffer = append(buffer, linearize(vSub, typ)...)
-		} else {
-			byts := [4]byte{}
-			switch typ.ScalarType {
-			case Float:
-				vFloat := math.Float32bits(normToFloat(vSub.Interface())[0])
-				byts = *(*[4]byte)(unsafe.Pointer(&vFloat))
-				buffer = append(buffer, byts[:]...)
-			case Int:
-				vInt := normToInt(vSub.Interface())[0]
-				byts = *(*[4]byte)(unsafe.Pointer(&vInt))
-				buffer = append(buffer, byts[:]...)
-			case Uint:
-				vUint := normToInt(vSub.Interface())[0]
-				byts = *(*[4]byte)(unsafe.Pointer(&vUint))
-				buffer = append(buffer, byts[:]...)
-			}
+	case []interface{}:
+		// special case from reflection
+		interfaceSlice := v.([]interface{})
+		uint32Slice := []uint32{}
+		for _, v := range interfaceSlice {
+			uint32Slice = append(uint32Slice, normToUint(v)...)
 		}
+		return uint32Slice
 	}
-
-	return buffer
-}
-
-func alignStd140(buffer []byte, typ UniformType) []byte {
-	const kWordLen = 4
-	const kVec2Alignment = kWordLen * 2
-	const kVec34Alignment = kWordLen * 4
-
-	util.Invariant(len(buffer)%kWordLen == 0) // all values are 32-bit aligned, flag this here
-
-	neededPadding := 0
-	switch typ.VectorSize {
-	case 0:
-	case 2:
-		mod := len(buffer) % kVec2Alignment
-		if mod == kVec2Alignment {
-			neededPadding = 0
-		} else {
-			neededPadding = kVec2Alignment - mod
-		}
-	case 3:
-		fallthrough
-	case 4:
-		mod := len(buffer) % kVec34Alignment
-		if mod == kVec34Alignment {
-			neededPadding = 0
-		} else {
-			neededPadding = kVec34Alignment - mod
-		}
-	default:
-		panic("unexpected vector size")
-	}
-	for i := 0; i < neededPadding; i++ {
-		buffer = append(buffer, 0)
-	}
-	return buffer
+	panicMsg := fmt.Sprintf("normToUint: unexpected type %s in bagging area", reflect.TypeOf(v))
+	panic(panicMsg)
 }

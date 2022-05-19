@@ -145,7 +145,7 @@ func (engine *Engine) Render() error {
 			previousFBO := engine.interstageFBOs[(i-1)%2]
 			previousResultLocation := gl.GetUniformLocation(stage.program, gl.Str(kPreviousResultBindingName))
 			if previousResultLocation == kGLLocationNotFound {
-				return locationNotFoundError(kPreviousResultBindingName)
+				return layoutNotFoundError("location", kPreviousResultBindingName)
 			} else {
 				gl.BindTextureUnit(uint32(previousResultLocation), previousFBO.textureName)
 			}
@@ -179,7 +179,7 @@ func (engine *Engine) Render() error {
 		previousFBOtexture := engine.getFinalResultTexture()
 		previousResultLocation := gl.GetUniformLocation(engine.drawStage.program, gl.Str(kPreviousResultBindingName))
 		if previousResultLocation == kGLLocationNotFound {
-			return locationNotFoundError(kPreviousResultBindingName)
+			return layoutNotFoundError("location", kPreviousResultBindingName)
 		} else {
 			gl.BindTextureUnit(uint32(previousResultLocation), previousFBOtexture)
 		}

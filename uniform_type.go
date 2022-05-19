@@ -17,11 +17,11 @@ const (
 type UniformType struct {
 	ScalarType ScalarTypeName
 	VectorSize int
-	IsBuffer   bool
+	IsArray    bool
 }
 
 func (uniformType *UniformType) UnmarshalYAML(unmarshal func(interface{}) error) (err error) {
-	const kBufferPrefix = "[]"
+	const kArrayPrefix = "[]"
 	const kFloatPrefix = "float"
 	const kIntPrefix = "int"
 	const kUintPrefix = "uint"
@@ -33,9 +33,9 @@ func (uniformType *UniformType) UnmarshalYAML(unmarshal func(interface{}) error)
 	}
 	rawString = strings.ToLower(rawString)
 
-	if strings.HasPrefix(rawString, kBufferPrefix) {
-		uniformType.IsBuffer = true
-		rawString = rawString[len(kBufferPrefix):]
+	if strings.HasPrefix(rawString, kArrayPrefix) {
+		uniformType.IsArray = true
+		rawString = rawString[len(kArrayPrefix):]
 	}
 
 	if strings.HasPrefix(rawString, kFloatPrefix) {
