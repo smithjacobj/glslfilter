@@ -123,7 +123,7 @@ func (engine *Engine) Init(stages []*FilterStage) (err error) {
 	engine.fboVAO = createWindowBufferVAO(fboTriangleVertices)
 	engine.stages = stages
 
-	if engine.drawStage, err = NewFilterStage(lastResultToScreen, []Texture{}); err != nil {
+	if engine.drawStage, err = NewFilterStage(lastResultToScreen, nil, nil); err != nil {
 		return err
 	}
 
@@ -133,8 +133,6 @@ func (engine *Engine) Init(stages []*FilterStage) (err error) {
 }
 
 func (engine *Engine) Render() error {
-	locationNotFoundError := func(bindingName string) error { return fmt.Errorf("binding %s not found", bindingName) }
-
 	for i, stage := range engine.stages {
 		gl.UseProgram(stage.program)
 
@@ -147,25 +145,17 @@ func (engine *Engine) Render() error {
 			previousFBO := engine.interstageFBOs[(i-1)%2]
 			previousResultLocation := gl.GetUniformLocation(stage.program, gl.Str(kPreviousResultBindingName))
 			if previousResultLocation == kGLLocationNotFound {
-				return locationNotFoundError(kPreviousResultBindingName)
+				return layoutNotFoundError("location", kPreviousResultBindingName)
 			} else {
 				gl.BindTextureUnit(uint32(previousResultLocation), previousFBO.textureName)
 			}
 		}
 
-		for bindingName, texture := range stage.textures {
-			bindingLocation := gl.GetUniformLocation(stage.program, gl.Str(bindingName+"\x00"))
-			if bindingLocation == kGLLocationNotFound {
-				return locationNotFoundError(bindingName)
-			} else {
-				var textureUnit int32 = -1
-				gl.GetUniformiv(stage.program, bindingLocation, &textureUnit)
-				if textureUnit == kGLLocationNotFound {
-					return fmt.Errorf("binding %s not found", bindingName)
-				} else {
-					gl.BindTextureUnit(uint32(textureUnit), texture)
-				}
-			}
+		if err := stage.bindDefinitionTextures(); err != nil {
+			return err
+		}
+		if err := stage.bindDefinitionUniforms(); err != nil {
+			return err
 		}
 
 		targetFBO := engine.interstageFBOs[i%2]
@@ -189,7 +179,7 @@ func (engine *Engine) Render() error {
 		previousFBOtexture := engine.getFinalResultTexture()
 		previousResultLocation := gl.GetUniformLocation(engine.drawStage.program, gl.Str(kPreviousResultBindingName))
 		if previousResultLocation == kGLLocationNotFound {
-			return locationNotFoundError(kPreviousResultBindingName)
+			return layoutNotFoundError("location", kPreviousResultBindingName)
 		} else {
 			gl.BindTextureUnit(uint32(previousResultLocation), previousFBOtexture)
 		}

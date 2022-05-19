@@ -1,9 +1,9 @@
 package glslfilter
 
 import (
+	"io"
 	"io/ioutil"
 	"log"
-	"os"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"gopkg.in/yaml.v2"
@@ -17,6 +17,12 @@ type TextureDefinition struct {
 	Filter TextureFilterType
 }
 
+type UniformDefinition struct {
+	Name  string
+	Type  UniformType
+	Value interface{}
+}
+
 type Definition struct {
 	Render struct {
 		Width  int
@@ -25,15 +31,19 @@ type Definition struct {
 	Stages []struct {
 		FragmentShaderPath string `yaml:"fragmentShaderPath"`
 		Textures           []TextureDefinition
+		Uniforms           []UniformDefinition
 	}
 }
 
-func LoadDefinitionFromStdin() (definition Definition, err error) {
-	definitionString, err := ioutil.ReadAll(os.Stdin)
+func LoadDefinitionFromFile(reader io.Reader) (definition Definition, err error) {
+	definitionString, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return definition, err
 	}
+	return LoadDefinition(definitionString)
+}
 
+func LoadDefinition(definitionString []byte) (definition Definition, err error) {
 	err = yaml.Unmarshal(definitionString, &definition)
 	if err != nil {
 		return definition, err
