@@ -10,6 +10,10 @@ layout(binding = 1, location = 3) uniform sampler2D pixelTexture;
 
 layout(location = 0) out vec4 fragColor;
 
+uniform float pincushion;
+uniform float scanlineContrast;
+uniform float scanlineBrightness;
+
 const float M_PI = radians(180.0);
 
 vec2 barrelDistort(vec2 v) {
@@ -19,7 +23,7 @@ vec2 barrelDistort(vec2 v) {
   float uva = atan(uv.x, uv.y);
   float uvd = sqrt(dot(uv, uv));
   //k = negative for pincushion, positive for barrel
-  float k = 0.1;
+  float k = pincushion;
   uvd = uvd*(1.0 + k*uvd*uvd);
   return vec2(0.5) + vec2(sin(uva), cos(uva))*uvd;
 }
@@ -40,7 +44,7 @@ vec4 pixelate(const vec4 inputColor, const vec2 texCoord, const vec2 inputTexelS
 }
 
 float scanlineValue(const vec2 texCoord, const vec2 inputTexelSize) {
-  return clamp(sin(texCoord.y / inputTexelSize.y * M_PI) * 0.25 + 1.0, 0, 1.0);
+  return clamp(sin(texCoord.y / inputTexelSize.y * M_PI) * scanlineContrast + scanlineBrightness, 0, 1.0);
 }
 
 vec4 sample(const vec2 texCoord, const vec2 inputTexelSize, const vec2 inputTextureSize) {

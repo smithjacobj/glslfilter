@@ -8,3 +8,13 @@ stages:
         name: "inputTexture"
       - path: "${script_path}/phosphor.png"
         name: "pixelTexture"
+    uniforms:
+      - name: "pincushion"
+        type: "float"
+        value: 0.2
+      - name: "scanlineContrast"
+        type: "float"
+        value: .5
+      - name: "scanlineBrightness"
+        type: "float"
+        value: .5
